@@ -126,6 +126,8 @@ Configuration Syntax
         example.com 192.0.2.10:4343
         # If port is not specified the listener port will be used
         example.net [2001:DB8::1:10]
+        # forward to Socks5 proxy upstream, use socks5 resolv hostname
+        example.org 127.0.0.1:1080 proxy_socks5
         # Or use regular expression to match
         .*\\.com    [2001:DB8::1:11]:443
         # Combining regular expression and wildcard will resolve the hostname
