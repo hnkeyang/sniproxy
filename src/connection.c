@@ -91,6 +91,7 @@ static void free_connection(struct Connection *);
 static void print_connection(FILE *, const struct Connection *);
 static void free_resolv_cb_data(struct resolv_cb_data *);
 
+#define ADDRESS_TYPE_DOMAIN 0x03
 
 void
 init_connections() {
