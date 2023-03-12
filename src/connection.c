@@ -44,7 +44,6 @@
 #include "address.h"
 #include "protocol.h"
 #include "logger.h"
-#include "socks5.h"
 
 
 #define IS_TEMPORARY_SOCKERR(_errno) (_errno == EAGAIN || \
