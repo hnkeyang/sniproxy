@@ -80,6 +80,12 @@ accept_backend_arg(struct Backend *backend, const char *arg) {
     } else if (backend->use_proxy_header == 0 &&
         strcasecmp(arg, "proxy_protocol") == 0) {
         backend->use_proxy_header = 1;
+    } else if (backend->use_proxy_header == 0 &&
+        strcasecmp(arg, "proxy_socks5") == 0) {
+        backend->use_proxy_socks5 = 1;
+    } else if (backend->use_proxy_socks5_remote_resolv == 0 &&
+        strcasecmp(arg, "proxy_socks5_remote_resolv") == 0) {
+        backend->use_proxy_socks5_remote_resolv = 1;
     } else {
         err("Unexpected table backend argument: %s", arg);
         return -1;

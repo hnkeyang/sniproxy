@@ -37,6 +37,8 @@ struct Backend {
     char *pattern;
     struct Address *address;
     int use_proxy_header;
+    int use_proxy_socks5;
+    int use_proxy_socks5_remote_resolv;
 
     /* Runtime fields */
     pcre *pattern_re;

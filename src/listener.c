@@ -659,7 +659,9 @@ listener_lookup_server_address(const struct Listener *listener,
         return (struct LookupResult){
             .address = new_addr,
             .caller_free_address = 1,
-            .use_proxy_header = table_result.use_proxy_header
+            .use_proxy_header = table_result.use_proxy_header,
+            .use_proxy_socks5 = table_result.use_proxy_socks5,
+            .use_proxy_socks5_remote_resolv = table_result.use_proxy_socks5_remote_resolv
         };
     } else if (address_port(table_result.address) == 0) {
         /* If the server port isn't specified return a new address using the
@@ -671,7 +673,9 @@ listener_lookup_server_address(const struct Listener *listener,
         return (struct LookupResult){
             .address = new_addr,
             .caller_free_address = 1,
-            .use_proxy_header = table_result.use_proxy_header
+            .use_proxy_header = table_result.use_proxy_header,
+            .use_proxy_socks5 = table_result.use_proxy_socks5,
+            .use_proxy_socks5_remote_resolv = table_result.use_proxy_socks5_remote_resolv
         };
     } else {
         return table_result;

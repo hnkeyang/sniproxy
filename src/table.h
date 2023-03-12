@@ -49,6 +49,8 @@ struct LookupResult {
     const struct Address *address;
     int caller_free_address;
     int use_proxy_header;
+    int use_proxy_socks5;
+    int use_proxy_socks5_remote_resolv;
 };
 
 struct Table *new_table();

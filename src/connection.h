@@ -39,6 +39,10 @@ struct Connection {
         PARSED,         /* Parsed initial request and extracted hostname */
         RESOLVING,      /* DNS query in progress */
         RESOLVED,       /* Server socket address resolved */
+        PROXY_CONNECT_REQUEST,    /* Socks5 Connect to Server Request */
+        PROXY_CONNECT_RESPONSE,   /* Socks5 Connect to Server Response */
+        PROXY_COMMAND_REQUEST,    /* Socks5 Command Request */
+        PROXY_COMMAND_RESPONSE,   /* Socks5 Command Response */
         CONNECTED,      /* Connected to server */
         SERVER_CLOSED,  /* Client closed socket */
         CLIENT_CLOSED,  /* Server closed socket */
@@ -58,6 +62,8 @@ struct Connection {
     struct ResolvQuery *query_handle;
     ev_tstamp established_timestamp;
     int use_proxy_header;
+    int use_proxy_socks5;
+    int use_proxy_socks5_remote_resolv;
 
     TAILQ_ENTRY(Connection) entries;
 };

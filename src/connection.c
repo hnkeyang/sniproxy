@@ -44,6 +44,7 @@
 #include "address.h"
 #include "protocol.h"
 #include "logger.h"
+#include "socks5.h"
 
 
 #define IS_TEMPORARY_SOCKERR(_errno) (_errno == EAGAIN || \
@@ -73,6 +74,10 @@ static void connection_cb(struct ev_loop *, struct ev_io *, int);
 static void resolv_cb(struct Address *, void *);
 static void reactivate_watchers(struct Connection *, struct ev_loop *);
 static void insert_proxy_v1_header(struct Connection *);
+static void proxy_socks5_connect_request(struct Connection *);
+static void proxy_socks5_connect_response(struct Connection *);
+static void proxy_socks5_command_request(struct Connection *);
+static void proxy_socks5_command_response(struct Connection *, struct ev_loop *);
 static void parse_client_request(struct Connection *);
 static void resolve_server_address(struct Connection *, struct ev_loop *);
 static void initiate_server_connect(struct Connection *, struct ev_loop *);
@@ -214,7 +219,11 @@ client_socket_open(const struct Connection *con) {
         con->state == RESOLVING ||
         con->state == RESOLVED ||
         con->state == CONNECTED ||
-        con->state == SERVER_CLOSED;
+        con->state == SERVER_CLOSED ||
+        con->state == PROXY_CONNECT_REQUEST ||
+        con->state == PROXY_CONNECT_RESPONSE ||
+        con->state == PROXY_COMMAND_REQUEST ||
+        con->state == PROXY_COMMAND_RESPONSE;
 }
 
 /*
@@ -225,7 +234,11 @@ client_socket_open(const struct Connection *con) {
 static inline int
 server_socket_open(const struct Connection *con) {
     return con->state == CONNECTED ||
-        con->state == CLIENT_CLOSED;
+        con->state == CLIENT_CLOSED ||
+        con->state == PROXY_CONNECT_REQUEST ||
+        con->state == PROXY_CONNECT_RESPONSE ||
+        con->state == PROXY_COMMAND_REQUEST ||
+        con->state == PROXY_COMMAND_RESPONSE;
 }
 
 /*
@@ -251,7 +264,8 @@ connection_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
         is_client ? close_client_socket : close_server_socket;
 
     /* Receive first in case the socket was closed */
-    if (revents & EV_READ && buffer_room(input_buffer)) {
+    if (revents & EV_READ && buffer_room(input_buffer) &&
+        (is_client || (!is_client && con->state == CONNECTED))) {
         ssize_t bytes_received = buffer_recv(input_buffer, w->fd, 0, loop);
         if (bytes_received < 0 && !IS_TEMPORARY_SOCKERR(errno)) {
             warn("recv(%s): %s, closing connection",
@@ -267,7 +281,8 @@ connection_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
     }
 
     /* Transmit */
-    if (revents & EV_WRITE && buffer_len(output_buffer)) {
+    if (revents & EV_WRITE && buffer_len(output_buffer) &&
+        (is_client || (!is_client && con->state == CONNECTED))) {
         ssize_t bytes_transmitted = buffer_send(output_buffer, w->fd, 0, loop);
         if (bytes_transmitted < 0 && !IS_TEMPORARY_SOCKERR(errno)) {
             warn("send(%s): %s, closing connection",
@@ -302,6 +317,13 @@ connection_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
         free_connection(con);
         return;
     }
+
+    if (!is_client && con->state == PROXY_CONNECT_REQUEST)
+        proxy_socks5_connect_response(con);
+    else if (!is_client && con->state == PROXY_CONNECT_RESPONSE)
+        proxy_socks5_command_request(con);
+    else if (!is_client && con->state == PROXY_COMMAND_REQUEST)
+        proxy_socks5_command_response(con, loop);
 
     reactivate_watchers(con, loop);
 }
@@ -555,6 +577,8 @@ resolve_server_address(struct Connection *con, struct ev_loop *loop) {
         memcpy(&con->server.addr, address_sa(result.address),
             con->server.addr_len);
         con->use_proxy_header = result.use_proxy_header;
+        con->use_proxy_socks5 = result.use_proxy_socks5;
+        con->use_proxy_socks5_remote_resolv = result.use_proxy_socks5_remote_resolv;
 
         if (result.caller_free_address)
             free((void *)result.address);
@@ -712,9 +736,82 @@ initiate_server_connect(struct Connection *con, struct ev_loop *loop) {
     struct ev_io *server_watcher = &con->server.watcher;
     ev_io_init(server_watcher, connection_cb, sockfd, EV_WRITE);
     con->server.watcher.data = con;
-    con->state = CONNECTED;
+
+    if (!con->use_proxy_socks5)
+        con->state = CONNECTED;
+    else
+        proxy_socks5_connect_request(con);
 
     ev_io_start(loop, server_watcher);
+}
+
+static void proxy_socks5_connect_request(struct Connection * con)
+{
+    char buf[] = { 0x05, 0x02, 0x00, 0x01};
+    write(con->server.watcher.fd, buf, 4);
+    con->state = PROXY_CONNECT_REQUEST;
+}
+
+static void proxy_socks5_connect_response(struct Connection * con)
+{
+    int buf_len = 128;
+    char buf[buf_len];
+    int n = read(con->server.watcher.fd, buf, buf_len);
+    if (n > 0)
+    {
+        if (buf[0] == 0x5 && buf[1] == 0x0)
+        {
+            con->state = PROXY_CONNECT_RESPONSE;
+            proxy_socks5_command_request(con);
+        }
+    }
+}
+
+struct Address {
+    enum {
+        HOSTNAME,
+        SOCKADDR,
+        WILDCARD,
+    } type;
+
+    size_t len;     /* length of data */
+    uint16_t port;  /* for hostname and wildcard */
+    char data[];
+};
+
+static void proxy_socks5_command_request(struct Connection * con)
+{
+    // 110.242.68.4 80
+    //char buf[] = { 0x05, 0x01, 0x00, 0x01, 0x6e, 0xf2, 0x44, 0x04, 0x00, 0x50 };
+    char buf[128] = { 0x05, 0x01, 0x00, ADDRESS_TYPE_DOMAIN};
+    int buf_len = 4;
+
+    buf[buf_len] = con->hostname_len;
+    buf_len++;
+
+    memcpy(buf + buf_len, con->hostname, con->hostname_len);
+    buf_len += con->hostname_len;
+    uint16_t hport = htons(con->listener->address->port);
+
+    memcpy(buf + buf_len, &hport, 2);
+    buf_len += 2;
+
+    write(con->server.watcher.fd, buf, buf_len);
+    con->state = PROXY_COMMAND_REQUEST;
+}
+
+static void proxy_socks5_command_response(struct Connection * con, struct ev_loop *loop)
+{
+    int buf_len = 128;
+    char buf[buf_len];
+    int n = read(con->server.watcher.fd, buf, buf_len);
+    if (n > 0)
+    {
+        if (buf[0] == 0x5 && buf[1] == 0x0)
+        {
+            con->state = CONNECTED;
+        }
+    }
 }
 
 /* Close client socket.
