@@ -128,6 +128,10 @@ Configuration Syntax
         example.net [2001:DB8::1:10]
         # forward to Socks5 proxy upstream, use socks5 resolv hostname
         example.org 127.0.0.1:1080 proxy_socks5
+        # example.io use source ip 192.168.1.1
+        example.io * source_address:192.168.1.1
+        # example.me use source ip 192.168.1.2
+        example.me * source_address:192.168.1.2
         # Or use regular expression to match
         .*\\.com    [2001:DB8::1:11]:443
         # Combining regular expression and wildcard will resolve the hostname

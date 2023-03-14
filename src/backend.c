@@ -86,9 +86,9 @@ accept_backend_arg(struct Backend *backend, const char *arg) {
     } else if (backend->use_proxy_socks5_remote_resolv == 0 &&
         strcasecmp(arg, "proxy_socks5_remote_resolv") == 0) {
         backend->use_proxy_socks5_remote_resolv = 1;
-    } else if (strncmp("source_address:", arg, 14) == 0)
+    } else if (strncmp("source_address:", arg, 15) == 0)
     {
-        inet_pton(AF_INET, arg + 15, &(backend->source_address));
+        inet_pton(AF_INET, arg + 16, &(backend->source_address));
     } else {
         err("Unexpected table backend argument: %s", arg);
         return -1;
