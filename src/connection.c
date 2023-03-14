@@ -543,6 +543,7 @@ resolve_server_address(struct Connection *con, struct ev_loop *loop) {
         cb_data->cb_free_addr = result.caller_free_address;
         cb_data->loop = loop;
         con->use_proxy_header = result.use_proxy_header;
+        con->backend_source_address = result.source_address;
 
         int resolv_mode = RESOLV_MODE_DEFAULT;
         if (con->listener->transparent_proxy) {
@@ -579,6 +580,7 @@ resolve_server_address(struct Connection *con, struct ev_loop *loop) {
         con->use_proxy_header = result.use_proxy_header;
         con->use_proxy_socks5 = result.use_proxy_socks5;
         con->use_proxy_socks5_remote_resolv = result.use_proxy_socks5_remote_resolv;
+        con->backend_source_address = result.source_address;
 
         if (result.caller_free_address)
             free((void *)result.address);
@@ -677,7 +679,7 @@ initiate_server_connect(struct Connection *con, struct ev_loop *loop) {
             abort_connection(con);
             return;
         }
-    } else if (con->listener->source_address) {
+    } else if (con->listener->source_address || con->backend_source_address) {
         int on = 1;
         int result = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
         if (result < 0) {
@@ -689,9 +691,19 @@ initiate_server_connect(struct Connection *con, struct ev_loop *loop) {
 
         int tries = 5;
         do {
-            result = bind(sockfd,
-                    address_sa(con->listener->source_address),
-                    address_sa_len(con->listener->source_address));
+            if (con->backend_source_address)
+            {
+                struct sockaddr_in saddr;
+                saddr.sin_family = AF_INET;
+                saddr.sin_addr.s_addr = con->backend_source_address;
+                result = bind(sockfd, (struct sockaddr *)&saddr, sizeof(saddr));
+            }
+            else
+            {
+                result = bind(sockfd,
+                        address_sa(con->listener->source_address),
+                        address_sa_len(con->listener->source_address));
+            }
         } while (tries-- > 0
                 && result < 0
                 && errno == EADDRINUSE

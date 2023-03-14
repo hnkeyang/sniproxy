@@ -139,7 +139,8 @@ table_lookup_server_address(const struct Table *table, const char *name, size_t 
     return (struct LookupResult){.address = b->address,
                                  .use_proxy_header = b->use_proxy_header,
                                  .use_proxy_socks5 = b->use_proxy_socks5,
-                                 .use_proxy_socks5_remote_resolv = b->use_proxy_socks5_remote_resolv};
+                                 .use_proxy_socks5_remote_resolv = b->use_proxy_socks5_remote_resolv,
+                                 .source_address = b->source_address};
 }
 
 void

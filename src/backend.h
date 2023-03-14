@@ -39,6 +39,7 @@ struct Backend {
     int use_proxy_header;
     int use_proxy_socks5;
     int use_proxy_socks5_remote_resolv;
+    uint32_t source_address;
 
     /* Runtime fields */
     pcre *pattern_re;

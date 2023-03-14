@@ -64,6 +64,7 @@ struct Connection {
     int use_proxy_header;
     int use_proxy_socks5;
     int use_proxy_socks5_remote_resolv;
+    uint32_t backend_source_address;
 
     TAILQ_ENTRY(Connection) entries;
 };
