@@ -39,6 +39,7 @@ struct Connection {
         PARSED,         /* Parsed initial request and extracted hostname */
         RESOLVING,      /* DNS query in progress */
         RESOLVED,       /* Server socket address resolved */
+        PROXY_SOCKET_CONNECTED,    /* Socks5 Connect to Server socket */
         PROXY_CONNECT_REQUEST,    /* Socks5 Connect to Server Request */
         PROXY_CONNECT_RESPONSE,   /* Socks5 Connect to Server Response */
         PROXY_COMMAND_REQUEST,    /* Socks5 Command Request */

@@ -73,9 +73,9 @@ static void connection_cb(struct ev_loop *, struct ev_io *, int);
 static void resolv_cb(struct Address *, void *);
 static void reactivate_watchers(struct Connection *, struct ev_loop *);
 static void insert_proxy_v1_header(struct Connection *);
-static void proxy_socks5_connect_request(struct Connection *);
-static void proxy_socks5_connect_response(struct Connection *);
-static void proxy_socks5_command_request(struct Connection *);
+static void proxy_socks5_connect_request(struct Connection *, struct ev_loop *);
+static void proxy_socks5_connect_response(struct Connection *, struct ev_loop *);
+static void proxy_socks5_command_request(struct Connection *, struct ev_loop *);
 static void proxy_socks5_command_response(struct Connection *, struct ev_loop *);
 static void parse_client_request(struct Connection *);
 static void resolve_server_address(struct Connection *, struct ev_loop *);
@@ -220,6 +220,7 @@ client_socket_open(const struct Connection *con) {
         con->state == RESOLVED ||
         con->state == CONNECTED ||
         con->state == SERVER_CLOSED ||
+        con->state == PROXY_SOCKET_CONNECTED ||
         con->state == PROXY_CONNECT_REQUEST ||
         con->state == PROXY_CONNECT_RESPONSE ||
         con->state == PROXY_COMMAND_REQUEST ||
@@ -235,6 +236,16 @@ static inline int
 server_socket_open(const struct Connection *con) {
     return con->state == CONNECTED ||
         con->state == CLIENT_CLOSED ||
+        con->state == PROXY_SOCKET_CONNECTED ||
+        con->state == PROXY_CONNECT_REQUEST ||
+        con->state == PROXY_CONNECT_RESPONSE ||
+        con->state == PROXY_COMMAND_REQUEST ||
+        con->state == PROXY_COMMAND_RESPONSE;
+}
+
+static inline int
+con_in_proxy_state(const struct Connection *con) {
+    return con->state == PROXY_SOCKET_CONNECTED ||
         con->state == PROXY_CONNECT_REQUEST ||
         con->state == PROXY_CONNECT_RESPONSE ||
         con->state == PROXY_COMMAND_REQUEST ||
@@ -265,7 +276,7 @@ connection_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
 
     /* Receive first in case the socket was closed */
     if (revents & EV_READ && buffer_room(input_buffer) &&
-        (is_client || (!is_client && con->state == CONNECTED))) {
+        (is_client || (!is_client && (con->state == CONNECTED || con_in_proxy_state(con))))) {
         ssize_t bytes_received = buffer_recv(input_buffer, w->fd, 0, loop);
         if (bytes_received < 0 && !IS_TEMPORARY_SOCKERR(errno)) {
             warn("recv(%s): %s, closing connection",
@@ -302,6 +313,16 @@ connection_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
     if (is_client && con->state == RESOLVED)
         initiate_server_connect(con, loop);
 
+    if (!is_client && con->state == PROXY_SOCKET_CONNECTED)
+        proxy_socks5_connect_request(con, loop);
+    if (!is_client && con->state == PROXY_CONNECT_REQUEST && buffer_len(input_buffer))
+        proxy_socks5_connect_response(con, loop);
+    if (!is_client && con->state == PROXY_CONNECT_RESPONSE)
+        proxy_socks5_command_request(con, loop);
+    if (!is_client && con->state == PROXY_COMMAND_REQUEST && buffer_len(input_buffer))
+        proxy_socks5_command_response(con, loop);
+
+
     /* Close other socket if we have flushed corresponding buffer */
     if (con->state == SERVER_CLOSED && buffer_len(con->server.buffer) == 0)
         close_client_socket(con, loop);
@@ -317,13 +338,6 @@ connection_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
         free_connection(con);
         return;
     }
-
-    if (!is_client && con->state == PROXY_CONNECT_REQUEST)
-        proxy_socks5_connect_response(con);
-    else if (!is_client && con->state == PROXY_CONNECT_RESPONSE)
-        proxy_socks5_command_request(con);
-    else if (!is_client && con->state == PROXY_COMMAND_REQUEST)
-        proxy_socks5_command_response(con, loop);
 
     reactivate_watchers(con, loop);
 }
@@ -752,29 +766,52 @@ initiate_server_connect(struct Connection *con, struct ev_loop *loop) {
     if (!con->use_proxy_socks5)
         con->state = CONNECTED;
     else
-        proxy_socks5_connect_request(con);
+        con->state = PROXY_SOCKET_CONNECTED;
 
     ev_io_start(loop, server_watcher);
 }
 
-static void proxy_socks5_connect_request(struct Connection * con)
+static void proxy_socks5_connect_request(struct Connection * con, struct ev_loop *loop)
 {
     char buf[] = { 0x05, 0x02, 0x00, 0x01};
-    write(con->server.watcher.fd, buf, 4);
+
+    struct Buffer *buffer = new_buffer(64, loop);
+    buffer_push(buffer, buf, 4);
+
+    ssize_t bytes_transmitted = buffer_send(buffer, con->server.watcher.fd, 0, loop);
+    if (bytes_transmitted < 0 && !IS_TEMPORARY_SOCKERR(errno)) {
+        warn("send(%s): %s, closing connection",
+                "proxy_socks5_connect_request",
+                strerror(errno));
+
+        close_server_socket(con, loop);
+    }
+
+    free_buffer(buffer);
+
     con->state = PROXY_CONNECT_REQUEST;
 }
 
-static void proxy_socks5_connect_response(struct Connection * con)
+static void proxy_socks5_connect_response(struct Connection * con, struct ev_loop *loop)
 {
-    int buf_len = 128;
-    char buf[buf_len];
-    int n = read(con->server.watcher.fd, buf, buf_len);
-    if (n > 0)
+    const char *payload;
+    size_t payload_len = buffer_coalesce(con->server.buffer, (const void **)&payload);
+
+    if (payload_len >= 2)
     {
-        if (buf[0] == 0x5 && buf[1] == 0x0)
+        if (payload[0] == 0x05 && (payload[1] == 0x00 || payload[1] == 0x02))
         {
+            reset_buffer(con->server.buffer);
+
             con->state = PROXY_CONNECT_RESPONSE;
-            proxy_socks5_command_request(con);
+            proxy_socks5_command_request(con, loop);
+        }
+        else
+        {
+            char server[INET6_ADDRSTRLEN + 8];
+            warn("Socks5 proxy_socks5_connect_response failed: %s",
+                    display_sockaddr(&con->server.addr, server, sizeof(server)));
+            abort_connection(con);
         }
     }
 }
@@ -791,10 +828,8 @@ struct Address {
     char data[];
 };
 
-static void proxy_socks5_command_request(struct Connection * con)
+static void proxy_socks5_command_request(struct Connection * con, struct ev_loop *loop)
 {
-    // 110.242.68.4 80
-    //char buf[] = { 0x05, 0x01, 0x00, 0x01, 0x6e, 0xf2, 0x44, 0x04, 0x00, 0x50 };
     char buf[128] = { 0x05, 0x01, 0x00, ADDRESS_TYPE_DOMAIN};
     int buf_len = 4;
 
@@ -808,20 +843,42 @@ static void proxy_socks5_command_request(struct Connection * con)
     memcpy(buf + buf_len, &hport, 2);
     buf_len += 2;
 
-    write(con->server.watcher.fd, buf, buf_len);
+
+    struct Buffer *buffer = new_buffer(64, loop);
+    buffer_push(buffer, buf, buf_len);
+
+    ssize_t bytes_transmitted = buffer_send(buffer, con->server.watcher.fd, 0, loop);
+    if (bytes_transmitted < 0 && !IS_TEMPORARY_SOCKERR(errno)) {
+        warn("send(%s): %s, closing connection",
+                "proxy_socks5_connect_request",
+                strerror(errno));
+
+        close_server_socket(con, loop);
+    }
+
+    free_buffer(buffer);
+
     con->state = PROXY_COMMAND_REQUEST;
 }
 
 static void proxy_socks5_command_response(struct Connection * con, struct ev_loop *loop)
 {
-    int buf_len = 128;
-    char buf[buf_len];
-    int n = read(con->server.watcher.fd, buf, buf_len);
-    if (n > 0)
+    const char *payload;
+    size_t payload_len = buffer_coalesce(con->server.buffer, (const void **)&payload);
+
+    if (payload_len >= 2)
     {
-        if (buf[0] == 0x5 && buf[1] == 0x0)
+        if (payload[0] == 0x05 && (payload[1] == 0x00 || payload[1] == 0x02))
         {
+            reset_buffer(con->server.buffer);
             con->state = CONNECTED;
+        }
+        else
+        {
+            char server[INET6_ADDRSTRLEN + 8];
+            warn("Socks5 proxy_socks5_command_response failed: %s",
+                    display_sockaddr(&con->server.addr, server, sizeof(server)));
+            abort_connection(con);
         }
     }
 }

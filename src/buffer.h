@@ -54,6 +54,13 @@ size_t buffer_peek(const struct Buffer *, void *, size_t);
 size_t buffer_coalesce(struct Buffer *, const void **);
 size_t buffer_pop(struct Buffer *, void *, size_t);
 size_t buffer_push(struct Buffer *, const void *, size_t);
+
+static void reset_buffer(struct Buffer *buffer)
+{
+    buffer->head = 0;
+    buffer->len = 0;
+}
+
 static inline size_t buffer_size(const struct Buffer *b) {
     return b->size_mask + 1;
 }
