@@ -22,6 +22,7 @@ gmon.out
 install-sh
 missing
 Makefile
+!openwrt/Makefile
 Makefile.in
 config.status
 config.log
