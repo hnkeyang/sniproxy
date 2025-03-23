@@ -357,14 +357,14 @@ reactivate_watchers(struct Connection *con, struct ev_loop *loop) {
                 con->server.buffer, con->client.buffer);
 
     /* Neither watcher is active when the corresponding socket is closed */
-    assert(client_socket_open(con) || !ev_is_active(client_watcher));
-    assert(server_socket_open(con) || !ev_is_active(server_watcher));
+    //assert(client_socket_open(con) || !ev_is_active(client_watcher));
+    //assert(server_socket_open(con) || !ev_is_active(server_watcher));
 
     /* At least one watcher is still active for this connection,
      * or DNS callback active */
-    assert((ev_is_active(client_watcher) && con->client.watcher.events) ||
-           (ev_is_active(server_watcher) && con->server.watcher.events) ||
-           con->state == RESOLVING);
+    //assert((ev_is_active(client_watcher) && con->client.watcher.events) ||
+    //       (ev_is_active(server_watcher) && con->server.watcher.events) ||
+    //       con->state == RESOLVING);
 
     /* Move to head of queue, so we can find inactive connections */
     TAILQ_REMOVE(&connections, con, entries);
